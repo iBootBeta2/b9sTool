@@ -4,9 +4,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#define VERSION "2.0.0"
+#define VERSION "2.1.0"
 #define RWCHUNK	(2048*512) //2048 sectors (1 MB)
-#define FNAME_SIZE 3
 
 //Function index________________________
 int main();
@@ -14,7 +13,7 @@ int checkNCSD();
 void dump3dsNand(int mode);
 void restore3dsNand(int mode);
 void xorbuff(u8 *in1, u8 *in2, u8 *out);
-void dgFIRM();
+void installB9S();
 u32 handleUI();
 u32 waitNandWriteDecision();
 void error(int code);
@@ -32,8 +31,7 @@ u32 sizeMB=0; //nand/firm size in MB
 u32 System=0; //will be one of the below 2 variables
 u32 N3DS=2;
 u32 O3DS=1;
-u32 firm_index=FNAME_SIZE - 1; //index for firmware version
-char workdir[]= "dgTool";
+char workdir[]= "boot9strap";
 char nand_type[80]={0};   //sd filename buffer for nand/firm dump/restore.
 u8 *workbuffer; //raw dump and restore in first two options
 u8 *fbuff; //sd firm files
@@ -42,25 +40,10 @@ u8 *nbuff; //nand
 PrintConsole topScreen;
 PrintConsole bottomScreen;
 
-const char *fnameOLD[FNAME_SIZE]={
-	"firm110_OLD.bin",
-	"firm111_OLD.bin",
-	"firm112_OLD.bin"
-};
-
-const char *fnameNEW[FNAME_SIZE]={
-	"firm110_NEW.bin",
-	"firm111_NEW.bin",
-	"firm112_NEW.bin"
-};
-
-const char *fnum[FNAME_SIZE]={
-	"11.0",
-	"11.1",
-	"11.2"
-};
-const char *fname104_OLD="firm104_OLD.bin";
-const char *fname104_NEW="firm104_NEW.bin";
+const char *boot9strap="boot9strap.firm";
+const char *fnameOLD="2.54-0_11.4_OLD.firm";
+const char *fnameNEW="2.54-0_11.4_NEW.firm";
+const char *fnum="11.4.0";
 
 int main() {
 	videoSetMode(MODE_0_2D);    //first 7 lines are all dual screen printing init taken from libnds's nds-examples
@@ -80,7 +63,7 @@ int main() {
 	nbuff = (u8*)memalign(RWCHUNK,32);
 	xbuff = (u8*)memalign(RWCHUNK,32);
 
-	mkdir(workdir, 0777);   //dgtool folder creation
+	mkdir(workdir, 0777);   //b9sTool folder creation
 	chdir(workdir);
 
 	checkNCSD();     //read ncsd header for needed info
@@ -95,35 +78,23 @@ int checkNCSD() {
 	nand_ReadSectors(0 , 1 , workbuffer);   //get NCSD (nand) header of the 3ds
 	memcpy(&sysid, workbuffer + 0x100, 4);  //NCSD magic
 	memcpy(&ninfo, workbuffer + 0x104, 4);  //nand size in sectors (943 or 1240 MB). used to determine old/new 3ds.
-	int res=-1;
-	int i;
-
 	if     (ninfo==0x00200000){ System=O3DS;}    //old3ds
 	else if(ninfo==0x00280000){ System=N3DS;}    //new3ds
 	if(!System || sysid != 0x4453434E)error(2);  //this error triggers if NCSD magic not present or nand size unexpected value.
 
-	if(System==O3DS){  //checking for 2 firm downgrade files, 10.4 and 11.0 - 11.2 as of this writing.
-		if(access(fname104_OLD,F_OK) == -1)return -1;  //these errors allowed to pass so users can still dump/restore nand.
-		for(i=firm_index;i >= 0;i--){                  //they will be caught again before actually trying to downgrade firm.
-			res=access(fnameOLD[i],F_OK);
-			if(res==0)break;
-		}
-		if(res==-1)return res;
+	if(System==O3DS){  //checking for firm files, 10.4 and 11.0 - 11.2 as of this writing.
+		if(access(boot9strap,F_OK) == -1)return -1;  //these errors allowed to pass so users can still dump/restore nand.
+		if(access(fnameOLD,F_OK) == -1)return -1;
 	}
 	else if(System==N3DS){
-		if(access(fname104_NEW,F_OK) == -1)return -1;
-		for(i=firm_index;i >= 0;i--){
-			res=access(fnameNEW[i],F_OK);
-			if(res==0)break;
-		}
-		if(res==-1)return res;
+		if(access(boot9strap,F_OK) == -1)return -1;
+		if(access(fnameNEW,F_OK) == -1)return -1;
 	}
 	else{
 		return -1;
 	}
 
-	firm_index=i;
-    return 0;
+  return 0;
 }
 
 void dump3dsNand(int mode) {
@@ -151,7 +122,7 @@ void dump3dsNand(int mode) {
 			strcpy(nand_type,"F0F1_NEW3DS.BIN");
 		}
 	}
-	iprintf("opening dgTool/%s\n",nand_type);
+	iprintf("opening b9sTool/%s\n",nand_type);
 	iprintf("hold B to cancel\n");
 
 	FILE *f = fopen(nand_type, "wb");
@@ -216,7 +187,7 @@ void restore3dsNand(int mode) {
 	if(waitNandWriteDecision())return;
 	consoleClear();
 
-	iprintf("opening dgTool/%s\n",nand_type);
+	iprintf("opening b9sTool/%s\n",nand_type);
 	iprintf("do NOT poweroff!!\n");
 
 	FILE *f = fopen(nand_type, "rb");
@@ -249,7 +220,7 @@ void xorbuff(u8 *in1, u8 *in2, u8 *out){
 
 }
 
-void dgFIRM() {
+void installB9S() {
 	consoleClear();
 	sizeMB=4;
 
@@ -263,14 +234,14 @@ void dgFIRM() {
 	FILE *fxxx;
 
 	if     (System==O3DS){
-		iprintf("opening %s/%s\nand          */%s\n", workdir, fname104_OLD,fnameOLD[firm_index]);
-		f104 = fopen(fname104_OLD,"rb");
-		fxxx = fopen(fnameOLD[firm_index],"rb");
+		iprintf("opening %s/%s\nand          */%s\n", workdir, boot9strap,fnameOLD);
+		f104 = fopen(boot9strap,"rb");
+		fxxx = fopen(fnameOLD,"rb");
 	}
 	else {
-		iprintf("opening %s/%s\nand          */%s\n", workdir, fname104_NEW,fnameNEW[firm_index]);
-		f104 = fopen(fname104_NEW,"rb");
-		fxxx = fopen(fnameNEW[firm_index],"rb");
+		iprintf("opening %s/%s\nand          */%s\n", workdir, boot9strap,fnameNEW);
+		f104 = fopen(boot9strap,"rb");
+		fxxx = fopen(fnameNEW,"rb");
 	}
 
 	if (!fxxx || !f104) error(3);
@@ -303,17 +274,17 @@ u32 handleUI(){
 	const int menu_size=6;
 	const char menu[][32]={
 		{"Exit\n"},
-		{"Downgrade FIRM0 to 10.4\n"},
-		{"Dump    nand"},
-		{"Restore nand\n"},
-		{"Dump    f0f1"},
-		{"Restore f0f1"},
+		{"Install boot9strap\n"},
+		{"Dump    NAND"},
+		{"Restore NAND\n"},
+		{"Dump    F0F1"},
+		{"Restore F0F1"},
 	};
 
-	iprintf("dgTool %s\n", VERSION);
+	iprintf("b9sTool %s\n", VERSION);
 	if    (System==O3DS)iprintf("%sOLD 3DS%s\n", yellow, white);
 	else                iprintf("%sNEW 3DS%s\n", yellow, white);
-	iprintf("%s%s%s\n\n", blue, fnum[firm_index], white);
+	iprintf("%s%s%s\n\n", blue, fnum, white);
 
 	for(int i=0;i<menu_size;i++){
 		iprintf("%s%s\n", i==menu_index ? " > " : "   ", menu[i]);
@@ -328,7 +299,7 @@ u32 handleUI(){
 	else if(keypressed & KEY_A){
 		consoleSelect(&bottomScreen);
 		if     (menu_index==0)return 0;          //break game loop and exit app
-		else if(menu_index==1)dgFIRM();
+		else if(menu_index==1)installB9S();
 		else if(menu_index==2)dump3dsNand(1);    // dump/restore full nand
 		else if(menu_index==3)restore3dsNand(1);
 		else if(menu_index==4)dump3dsNand(0);    // dump/restore firm0 and firm1

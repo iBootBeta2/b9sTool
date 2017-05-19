@@ -1,4 +1,4 @@
-This software, dgTool 2.0.0 (dgTool.nds), is distributed under the
+This software, b9sTool 2.1.0 (b9sTool.nds), is distributed under the
 The MIT License (MIT)
 
 Copyright (c) 2016, anon
